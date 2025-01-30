@@ -383,7 +383,8 @@ def create_audio_player_html(audio_bytes):
 def process_audio_to_text(audio_bytes):
     """Convert audio to text using OpenAI's Whisper model"""
     try:
-        client = OpenAI()
+        # Initialize client with explicit API key
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         
         # Save audio bytes to a temporary file
         temp_audio_path = "temp_audio.wav"
@@ -399,25 +400,28 @@ def process_audio_to_text(audio_bytes):
                 )
             return transcription
         finally:
-            # Clean up temporary file
             if os.path.exists(temp_audio_path):
                 os.remove(temp_audio_path)
     except Exception as e:
         print(f"Error processing audio to text: {str(e)}")
-        raise
+        return None
 
 def text_to_speech(text):
     """Convert text to speech using OpenAI's TTS API"""
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-    
-    response = client.audio.speech.create(
-        model="tts-1",
-        voice="nova",
-        input=text
-    )
-    
-    # Get the binary content
-    return response.content  # This returns bytes
+    try:
+        # Initialize client with explicit API key
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        
+        response = client.audio.speech.create(
+            model="tts-1",
+            voice="nova",
+            input=text
+        )
+        
+        return response.content
+    except Exception as e:
+        print(f"Error generating speech: {str(e)}")
+        return None
 
 
 # Sidebar content
