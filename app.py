@@ -16,7 +16,6 @@ from langchain.memory import ConversationBufferWindowMemory
 from langchain_core.messages import HumanMessage, AIMessage
 from audio_recorder_streamlit import audio_recorder
 from openai import OpenAI
-import base64
 from pathlib import Path
 import os
 
@@ -121,6 +120,7 @@ For boxplots:
    3. The visualization JSON object if applicable
 
 Remember:
+- Always respond in Spanish (Colombia)
 - Keep explanations concise but informative
 - Always validate data before creating visualizations
 - Handle missing or invalid data appropriately
@@ -296,7 +296,7 @@ def initialize_agent(df, conversation_manager):
     """Initialize LangChain agent with memory"""
     llm = ChatOpenAI(
         temperature=0,
-        model="gpt-4",
+        model="gpt-4o",
         streaming=True
     )
     
@@ -347,53 +347,68 @@ def has_valid_data():
 # Audio Feature Management 
 def create_audio_player_html(audio_bytes):
     """Create a custom HTML audio player with a dark theme"""
-    b64 = base64.b64encode(audio_bytes).decode()
-    return f"""
-        <style>
-            audio {{
-                width: 100%;
-                height: 40px;
-                background-color: #2d2d2d;
-                border-radius: 8px;
-            }}
-            audio::-webkit-media-controls-panel {{
-                background-color: #2d2d2d;
-            }}
-            audio::-webkit-media-controls-current-time-display,
-            audio::-webkit-media-controls-time-remaining-display {{
-                color: white;
-            }}
-        </style>
-        <audio controls autoplay="true">
-            <source src="data:audio/wav;base64,{b64}" type="audio/wav">
-        </audio>
-    """
+    try:
+        import base64
+        # Ensure we're dealing with bytes
+        if isinstance(audio_bytes, str):
+            audio_bytes = audio_bytes.encode()
+        
+        # Properly encode to base64
+        b64 = base64.b64encode(audio_bytes).decode('utf-8')
+        
+        return f"""
+            <style>
+                audio {{
+                    width: 100%;
+                    height: 40px;
+                    background-color: #2d2d2d;
+                    border-radius: 8px;
+                }}
+                audio::-webkit-media-controls-panel {{
+                    background-color: #2d2d2d;
+                }}
+                audio::-webkit-media-controls-current-time-display,
+                audio::-webkit-media-controls-time-remaining-display {{
+                    color: white;
+                }}
+            </style>
+            <audio controls autoplay="true">
+                <source src="data:audio/wav;base64,{b64}" type="audio/wav">
+            </audio>
+        """
+    except Exception as e:
+        print(f"Error creating audio player: {str(e)}")
+        return f'<div class="error">Error creating audio player: {str(e)}</div>'
 
 def process_audio_to_text(audio_bytes):
     """Convert audio to text using OpenAI's Whisper model"""
-    client = OpenAI()
-    
-    # Save audio bytes to a temporary file
-    temp_audio_path = "temp_audio.wav"
-    with open(temp_audio_path, "wb") as f:
-        f.write(audio_bytes)
-    
     try:
-        with open(temp_audio_path, "rb") as audio_file:
-            transcription = client.audio.transcriptions.create(
-                model="whisper-1", 
-                file=audio_file,
-                response_format="text"
-            )
-        return transcription
-    finally:
-        # Clean up temporary file
-        if os.path.exists(temp_audio_path):
-            os.remove(temp_audio_path)
+        client = OpenAI()
+        
+        # Save audio bytes to a temporary file
+        temp_audio_path = "temp_audio.wav"
+        with open(temp_audio_path, "wb") as f:
+            f.write(audio_bytes)
+        
+        try:
+            with open(temp_audio_path, "rb") as audio_file:
+                transcription = client.audio.transcriptions.create(
+                    model="whisper-1", 
+                    file=audio_file,
+                    response_format="text"
+                )
+            return transcription
+        finally:
+            # Clean up temporary file
+            if os.path.exists(temp_audio_path):
+                os.remove(temp_audio_path)
+    except Exception as e:
+        print(f"Error processing audio to text: {str(e)}")
+        raise
 
 def text_to_speech(text):
     """Convert text to speech using OpenAI's TTS API"""
-    client = OpenAI()
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     
     response = client.audio.speech.create(
         model="tts-1",
@@ -401,7 +416,8 @@ def text_to_speech(text):
         input=text
     )
     
-    return response.content
+    # Get the binary content
+    return response.content  # This returns bytes
 
 
 # Sidebar content
@@ -497,12 +513,24 @@ with st.sidebar:
     
 # Hidden audio player 
 def create_hidden_audio_player(audio_bytes):
-    b64 = base64.b64encode(audio_bytes).decode()
-    return f"""
-        <audio autoplay>
-            <source src="data:audio/wav;base64,{b64}" type="audio/wav">
-        </audio>
-    """
+    """Create a hidden audio player for autoplay"""
+    try:
+        import base64
+        # Ensure we're dealing with bytes
+        if isinstance(audio_bytes, str):
+            audio_bytes = audio_bytes.encode()
+            
+        # Properly encode to base64
+        b64 = base64.b64encode(audio_bytes).decode('utf-8')
+        
+        return f"""
+            <audio autoplay>
+                <source src="data:audio/wav;base64,{b64}" type="audio/wav">
+            </audio>
+        """
+    except Exception as e:
+        print(f"Error creating hidden audio player: {str(e)}")
+        return ""
 
 # Initialize session state
 if 'messages' not in st.session_state:
@@ -587,11 +615,16 @@ if uploaded_file:
                 
                 # Display text response
                 st.markdown(text_response)
-                
-                # Generate and display TTS audio response
-                audio_response = text_to_speech(text_response)
-                st.markdown(create_hidden_audio_player(audio_response), unsafe_allow_html=True)
-                
+                # Where you generate and display TTS audio response
+                try:
+                    audio_response = text_to_speech(text_response)
+                    if audio_response:
+                        hidden_player = create_hidden_audio_player(audio_response)
+                        if hidden_player:
+                            st.markdown(hidden_player, unsafe_allow_html=True)
+                except Exception as e:
+                    print(f"Error playing audio response: {str(e)}")
+                            
                 # Create and display visualization if present
                 if vis_data:
                     try:
