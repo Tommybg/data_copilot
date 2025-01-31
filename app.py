@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 # LangChain imports
 from langchain_openai import ChatOpenAI
 from langchain_experimental.agents import create_pandas_dataframe_agent
-from langchain.callbacks import StreamlitCallbackHandler
+from langchain_community.callbacks import StreamlitCallbackHandler
 from langchain.agents import AgentType
 from langchain.prompts import PromptTemplate
 from langchain.memory import ConversationBufferWindowMemory
