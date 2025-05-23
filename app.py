@@ -14,12 +14,21 @@ from langchain.agents import AgentType
 from langchain.prompts import PromptTemplate
 from langchain.memory import ConversationBufferWindowMemory
 from langchain_core.messages import HumanMessage, AIMessage
-from audio_recorder_streamlit import audio_recorder
-from openai import OpenAI
-from pathlib import Path
-import os
 
+# Audio imports - with error handling
+try:
+    from audio_recorder_streamlit import audio_recorder
+    AUDIO_AVAILABLE = True
+except ImportError:
+    AUDIO_AVAILABLE = False
+    st.warning("Audio recorder not available. Install with: pip install audio-recorder-streamlit")
 
+try:
+    from openai import OpenAI
+    OPENAI_AVAILABLE = True
+except ImportError:
+    OPENAI_AVAILABLE = False
+    st.warning("OpenAI not available. Install with: pip install openai")
 
 # Load environment variables
 load_dotenv()
@@ -34,9 +43,8 @@ if not OPENAI_API_KEY:
 # Configure page settings
 st.set_page_config(page_title="Data Analyzer", layout="wide")
 
-# System prompt template (Your existing SYSTEM_PROMPT here)
 # System prompt template
-SYSTEM_PROMPT = """ You are a data analysis assistant that helps governement users understand their data through visualizations and analysis, and identify valuable insights. 
+SYSTEM_PROMPT = """You are a data analysis assistant that helps government users understand their data through visualizations and analysis, and identify valuable insights. 
 When working with the provided Data, follow these guidelines:
 
 1. ANALYSIS APPROACH:
@@ -66,56 +74,29 @@ For horizontal bar charts:
 {{"type": "horizontal_bar", "title": "Title", "data": {{"labels": ["A", "B"], "values": [{{"data": [1, 2], "label": "Series"}}]}}, "xAxis": {{"label": "X"}}, "yAxis": {{"label": "Y"}}}}
 
 For histograms:
-{{"type": "histogram", "title": "Title", "data": {{"values": [1, 2, 3, 4, 5], "label": "Series"}}}, "xAxis": {{"label": "Value"}}, "yAxis": {{"label": "Frequency"}}}}
+{{"type": "histogram", "title": "Title", "data": {{"values": [{{"data": [1, 2, 3, 4, 5], "label": "Series"}}]}}}, "xAxis": {{"label": "Value"}}, "yAxis": {{"label": "Frequency"}}}}
 
 For boxplots:
 {{"type": "boxplot", "title": "Title", "data": {{"values": [{{"data": [1, 2, 3, 4, 5], "label": "Series"}}]}}}, "xAxis": {{"label": "Category"}}, "yAxis": {{"label": "Value"}}}}
 
 3. CHOOSING VISUALIZATIONS:
-    - Bar Charts
-        Use Case: Bar charts are ideal for comparing different categories or groups. They clearly show differences in magnitude between discrete categories, making it easy to visualize relative sizes, such as sales figures for different products or survey responses across demographics. 
-        **When to use:** Use when you want to compare quantities across different categories.
-        **Keywords (Spanish):** "comparar", "gráfico de barras", "categorías", "diferencias"
-
-    - Line Charts
-        Use Case: Line charts are best suited for displaying trends over time. They track changes across continuous data points, making them useful for showing how variables evolve, such as stock prices or temperature changes throughout a year.
-        **When to use:** Use when you want to show trends or changes over a period.
-        **Keywords (Spanish):** "tendencia", "gráfico de líneas", "cambio", "evolución"
-
-    - Pie Charts
-        Use Case: Pie charts illustrate part-to-whole relationships, effectively showing how individual categories contribute to a total. However, they should be limited to six categories to maintain clarity and prevent confusion from overly segmented slices.
-        **When to use:** Use when you want to show proportions of a whole.
-        **Keywords (Spanish):** "porcentaje", "gráfico circular", "parte de un todo", "distribución"
-
-    - Scatter Plots
-        Use Case: Scatter plots are perfect for exploring the correlation between two variables. They help identify relationships, patterns, or trends, such as the relationship between study time and exam scores, by plotting data points on a two-dimensional graph.
-        **When to use:** Use when you want to analyze the relationship between two continuous variables.
-        **Keywords (Spanish):** "correlación", "gráfico de dispersión", "relación", "variables"
-
-    - Horizontal Bar Charts
-        Use Case: Horizontal bar charts are particularly useful when dealing with many categories or long category names that may be difficult to display vertically. They offer a clearer view of comparisons, especially when category labels are lengthy, enhancing readability.
-        **When to use:** Use when you have long category names or many categories to compare.
-        **Keywords (Spanish):** "gráfico de barras horizontal", "comparar", "categorías largas", "lectura clara"
-
-    - Histogram: 
-        Use Case: Histograms are ideal for visualizing the distribution of a continuous variable. They help in understanding the frequency distribution of data points within specified intervals or bins. For example, a histogram can be used to analyze the distribution of ages in a population, allowing you to easily see patterns such as skewness or the presence of multiple modes (peaks).
-        **When to use:** Use when you want to understand the distribution of a continuous variable.
-        **Keywords (Spanish):** "histograma", "distribución", "frecuencia", "intervalos"
-
-    - Boxplot: 
-        Use Case: Box plots, or box-and-whisker plots, are essential for summarizing the distribution of a dataset by showcasing its central tendency, variability, and potential outliers. They provide a visual representation of the median, quartiles, and range of the data. For instance, box plots can be utilized to compare test scores across different student groups, allowing for a quick assessment of central tendencies and the presence of outliers, which can be crucial for understanding group differences.
-        **When to use:** Use when you want to summarize data distributions and identify outliers.
-        **Keywords (Spanish):** "boxplot", "diagrama de caja", "distribución", "valores atípicos"
+    - Bar Charts: Use for comparing different categories
+    - Line Charts: Use for showing trends over time  
+    - Pie Charts: Use for showing proportions of a whole
+    - Scatter Plots: Use for analyzing relationships between two variables
+    - Horizontal Bar Charts: Use when category names are long
+    - Histogram: Use for distribution of continuous variables
+    - Boxplot: Use for summarizing data distributions and identifying outliers
 
 4. REASONING: 
-    - Use {CHOOSING VISUALIZATION} to reason and think which type of visualization the user needs or could use. If a {keyword} is used then you choose the visualization containing that keyword. 
-    - Dont hallucinate any data or result.
-    - Use best practices for design in the visualizations. Make sure to maintain a consistent design and beautiful visualizations. 
-
+    - Choose the appropriate visualization based on the data and user request
+    - Don't hallucinate any data or results
+    - Use best practices for design in visualizations
+    - Maintain consistent design and beautiful visualizations
 
 5. RESPONSE FORMAT:
    Always structure your response as:
-   1. Brief explanation of the analysis and add in your data expertise suggestion. Try to be proactive if the yask ambiguous questions. 
+   1. Brief explanation of the analysis
    2. Key insights from the data
    3. The visualization JSON object if applicable
 
@@ -125,10 +106,10 @@ Remember:
 - Always validate data before creating visualizations
 - Handle missing or invalid data appropriately
 - Include proper labels and titles in visualizations
-- Format numbers for readability (e.g., use K for thousands, M for millions) 
-- Do not use curse words or do anything ilegal, stick to just data analysis. 
-- If they ask who you are ("Quien eres" or similar), say "Soy Data Copilot tu copilot para el analisis de datos, diseñado para obtener insights, analisis y propuestas de valor por medio de los datos dados"
-- Remember you have memory and can see the past 5 messages to have context of what the user wants. 
+- Format numbers for readability
+- Do not use inappropriate language, stick to data analysis
+- If asked who you are, say "Soy Data Copilot tu copilot para el análisis de datos, diseñado para obtener insights, análisis y propuestas de valor por medio de los datos dados"
+- Remember you have memory and can see the past 5 messages for context
 """
 
 # Create uploads directory if it doesn't exist
@@ -148,22 +129,25 @@ class ConversationManager:
         
     def add_message(self, role: str, content: str):
         """Add a message to memory and ensure it's synced with session state"""
-        if role == "human":
-            self.memory.chat_memory.add_message(HumanMessage(content=content))
-        elif role == "ai":
-            self.memory.chat_memory.add_message(AIMessage(content=content))
-            
-        # Sync memory with session state messages
-        if 'messages' in st.session_state:
-            # Update session state messages to match memory
-            messages = self.get_chat_history()
-            st.session_state.messages = [
-                {
-                    "role": "user" if isinstance(msg, HumanMessage) else "assistant",
-                    "content": msg.content
-                }
-                for msg in messages
-            ]
+        try:
+            if role == "human":
+                self.memory.chat_memory.add_message(HumanMessage(content=content))
+            elif role == "ai":
+                self.memory.chat_memory.add_message(AIMessage(content=content))
+                
+            # Sync memory with session state messages
+            if 'messages' in st.session_state:
+                # Update session state messages to match memory
+                messages = self.get_chat_history()
+                st.session_state.messages = [
+                    {
+                        "role": "user" if isinstance(msg, HumanMessage) else "assistant",
+                        "content": msg.content
+                    }
+                    for msg in messages[-10:]  # Keep last 10 messages to prevent overflow
+                ]
+        except Exception as e:
+            st.error(f"Error adding message to memory: {str(e)}")
     
     def get_chat_history(self):
         """Get the current chat history"""
@@ -177,6 +161,12 @@ class ConversationManager:
 
 def create_plotly_visualization(vis_data):
     """Create Plotly visualizations based on generated graph data"""
+    if not isinstance(vis_data, dict):
+        raise ValueError("Invalid visualization data format")
+    
+    if 'type' not in vis_data or 'data' not in vis_data:
+        raise ValueError("Missing required visualization parameters")
+        
     try:
         graph_type = vis_data['type']
         data = vis_data['data']
@@ -187,20 +177,24 @@ def create_plotly_visualization(vis_data):
         fig = go.Figure()
         
         if graph_type == 'bar':
+            if not isinstance(data.get('values', []), list) or not isinstance(data.get('labels', []), list):
+                raise ValueError("Invalid data format for bar chart")
             for idx, series in enumerate(data.get('values', [])):
                 fig.add_trace(go.Bar(
                     x=data['labels'],
-                    y=series['data'],
+                    y=series.get('data', []),
                     name=series.get('label', f'Series {idx+1}'),
                     marker_color=colors[idx % len(colors)]
                 ))
             fig.update_layout(barmode='group')
             
         elif graph_type == 'horizontal_bar':
+            if not isinstance(data.get('values', []), list) or not isinstance(data.get('labels', []), list):
+                raise ValueError("Invalid data format for horizontal bar chart")
             for idx, series in enumerate(data.get('values', [])):
                 fig.add_trace(go.Bar(
                     y=data['labels'],
-                    x=series['data'],
+                    x=series.get('data', []),
                     orientation='h',
                     name=series.get('label', f'Series {idx+1}'),
                     marker_color=colors[idx % len(colors)]
@@ -208,55 +202,77 @@ def create_plotly_visualization(vis_data):
             fig.update_layout(barmode='group')
             
         elif graph_type == 'line':
+            if not isinstance(data.get('xValues', []), list) or not isinstance(data.get('yValues', []), list):
+                raise ValueError("Invalid data format for line chart")
             for idx, series in enumerate(data.get('yValues', [])):
-                fig.add_trace(go.Line(
+                fig.add_trace(go.Scatter(
                     x=data['xValues'],
-                    y=series['data'],
+                    y=series.get('data', []),
                     mode='lines+markers',
                     name=series.get('label', f'Series {idx+1}'),
                     line=dict(color=colors[idx % len(colors)])
                 ))
                 
         elif graph_type == 'pie':
+            if not isinstance(data, list):
+                raise ValueError("Invalid data format for pie chart")
             fig = go.Figure(data=[go.Pie(
-                labels=[item['label'] for item in data],
-                values=[item['value'] for item in data],
+                labels=[item.get('label', '') for item in data],
+                values=[item.get('value', 0) for item in data],
                 marker=dict(colors=colors[:len(data)])
             )])
             
         elif graph_type == 'scatter':
+            if not isinstance(data.get('series', []), list):
+                raise ValueError("Invalid data format for scatter plot")
             for idx, series in enumerate(data.get('series', [])):
+                x_vals = [point.get('x', 0) for point in series.get('data', [])]
+                y_vals = [point.get('y', 0) for point in series.get('data', [])]
                 fig.add_trace(go.Scatter(
-                    x=[point['x'] for point in series['data']],
-                    y=[point['y'] for point in series['data']],
+                    x=x_vals,
+                    y=y_vals,
                     mode='markers',
                     name=series.get('label', f'Series {idx+1}'),
                     marker=dict(color=colors[idx % len(colors)])
                 ))
         
         elif graph_type == 'histogram':
-            for idx, series in enumerate(data.get('values', [])):
-                fig.add_trace(go.Histogram(
-                    x=series['data'],
-                    name=series.get('label', f'Series {idx+1}'),
-                    marker_color=colors[idx % len(colors)],
-                    # Enable overlaid histograms if multiple series
-                    opacity=0.75 if len(data.get('values', [])) > 1 else 1
-                ))
-            # Configure histogram layout for multiple series
-            if len(data.get('values', [])) > 1:
-                fig.update_layout(barmode='overlay')
+            values = data.get('values', [])
+            if isinstance(values, list) and len(values) > 0:
+                # Handle both old and new format
+                if isinstance(values[0], dict):
+                    # New format with series
+                    for idx, series in enumerate(values):
+                        fig.add_trace(go.Histogram(
+                            x=series.get('data', []),
+                            name=series.get('label', f'Series {idx+1}'),
+                            marker_color=colors[idx % len(colors)],
+                            opacity=0.75 if len(values) > 1 else 1
+                        ))
+                else:
+                    # Old format - direct values
+                    fig.add_trace(go.Histogram(
+                        x=values,
+                        name=data.get('label', 'Histogram'),
+                        marker_color=colors[0],
+                        opacity=1
+                    ))
+                if len(values) > 1:
+                    fig.update_layout(barmode='overlay')
             
-        elif graph_type == 'box':
-            for idx, series in enumerate(data.get('values', [])):
-                fig.add_trace(go.Box(
-                    y=series['data'],
-                    name=series.get('label', f'Series {idx+1}'),
-                    marker_color=colors[idx % len(colors)],
-                    boxpoints='outliers',  # Show outlier points
-                    boxmean=True  # Show mean line
-                ))
-
+        elif graph_type in ['box', 'boxplot']:
+            values = data.get('values', [])
+            if isinstance(values, list) and len(values) > 0:
+                for idx, series in enumerate(values):
+                    fig.add_trace(go.Box(
+                        y=series.get('data', []),
+                        name=series.get('label', f'Series {idx+1}'),
+                        marker_color=colors[idx % len(colors)],
+                        boxpoints='outliers',
+                        boxmean=True
+                    ))
+        else:
+            raise ValueError(f"Unsupported graph type: {graph_type}")
 
         # Enhanced layout configuration
         fig.update_layout(
@@ -264,76 +280,106 @@ def create_plotly_visualization(vis_data):
             title=dict(
                 text=vis_data.get('title', ''),
                 x=0.5,
-                xanchor='center'
+                xanchor='center',
+                font=dict(size=20)
             ),
-            xaxis_title=vis_data.get('xAxis', {}).get('label', ''),
-            yaxis_title=vis_data.get('yAxis', {}).get('label', ''),
+            xaxis_title=dict(
+                text=vis_data.get('xAxis', {}).get('label', ''),
+                font=dict(size=14)
+            ),
+            yaxis_title=dict(
+                text=vis_data.get('yAxis', {}).get('label', ''),
+                font=dict(size=14)
+            ),
             showlegend=True,
             legend=dict(
                 orientation="h",
                 yanchor="bottom",
                 y=1.02,
                 xanchor="right",
-                x=1
+                x=1,
+                font=dict(size=12)
             ),
-            margin=dict(l=50, r=50, t=60, b=50)
+            margin=dict(l=50, r=50, t=60, b=50),
+            plot_bgcolor='white',
+            paper_bgcolor='white'
         )
+        
+        # Add grid lines
+        fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='LightGray')
+        fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='LightGray')
         
         return fig
         
     except Exception as e:
-        st.error(f"Error creating visualization: {str(e)}")
-        return None
+        raise ValueError(f"Error creating visualization: {str(e)}")
 
+@st.cache_data
 def load_csv(uploaded_file):
-    """Load and process uploaded CSV file"""
-    file_path = UPLOADS_DIR / uploaded_file.name
-    with open(file_path, 'wb') as f:
-        f.write(uploaded_file.getbuffer())
-    return pd.read_csv(file_path)
+    """Load and process uploaded CSV file with caching"""
+    try:
+        # Read CSV directly from uploaded file buffer
+        df = pd.read_csv(uploaded_file)
+        return df
+    except Exception as e:
+        st.error(f"Error loading CSV file: {str(e)}")
+        return None
 
 def initialize_agent(df, conversation_manager):
     """Initialize LangChain agent with memory"""
-    llm = ChatOpenAI(
-        temperature=0,
-        model="gpt-4o",
-        streaming=True
-    )
-    
-    return create_pandas_dataframe_agent(
-        llm,
-        df,
-        verbose=True,
-        handle_parsing_errors=True,
-        agent_type=AgentType.OPENAI_FUNCTIONS,
-        prefix=SYSTEM_PROMPT,
-        memory=conversation_manager.memory,
-        allow_dangerous_code=True
-    )
+    try:
+        # Basic configuration for ChatOpenAI
+        llm = ChatOpenAI(
+            model="gpt-4",  # Using standard model name
+            temperature=0,
+            streaming=True,
+            api_key=OPENAI_API_KEY
+        )
+        
+        # Create the agent with the configured LLM
+        agent = create_pandas_dataframe_agent(
+            llm,
+            df,
+            verbose=True,
+            handle_parsing_errors=True,
+            agent_type=AgentType.OPENAI_FUNCTIONS,
+            prefix=SYSTEM_PROMPT,
+            allow_dangerous_code=True  # Required for newer versions
+        )
+        
+        return agent
+    except Exception as e:
+        st.error(f"Error al inicializar el modelo de IA: {str(e)}")
+        print(f"Detailed error: {e}")  # For debugging
+        return None
 
 def process_agent_response(response):
     """Process the agent's response to extract visualization data if present"""
     try:
         # Remove any ```json and ``` tags from the response
-        response = response.replace('```json', '').replace('```', '')
+        clean_response = str(response).replace('```json', '').replace('```', '')
         
         # Check if response contains JSON visualization data
-        start_idx = response.find('{')
-        end_idx = response.rfind('}') + 1
+        start_idx = clean_response.find('{')
+        end_idx = clean_response.rfind('}') + 1
         
-        if start_idx != -1 and end_idx != -1:
-            json_str = response[start_idx:end_idx]
+        if start_idx != -1 and end_idx > start_idx:
+            json_str = clean_response[start_idx:end_idx]
             # Clean up any potential markdown formatting
             json_str = json_str.strip('`').strip()
             
-            vis_data = json.loads(json_str)
-            if 'type' in vis_data and 'data' in vis_data:
-                return response[:start_idx].strip(), vis_data
+            try:
+                vis_data = json.loads(json_str)
+                if isinstance(vis_data, dict) and 'type' in vis_data and 'data' in vis_data:
+                    text_part = clean_response[:start_idx].strip()
+                    return text_part if text_part else clean_response, vis_data
+            except json.JSONDecodeError:
+                pass
         
-        return response, None
+        return clean_response, None
     except Exception as e:
         print(f"Error processing response: {str(e)}")
-        return response, None
+        return str(response), None
 
 def has_valid_data():
     """Check if there's valid data in the session state"""
@@ -345,46 +391,35 @@ def has_valid_data():
     )
 
 # Audio Feature Management 
-def create_audio_player_html(audio_bytes):
-    """Create a custom HTML audio player with a dark theme"""
+def create_hidden_audio_player(audio_bytes):
+    """Create a hidden audio player for autoplay"""
     try:
         import base64
         # Ensure we're dealing with bytes
         if isinstance(audio_bytes, str):
             audio_bytes = audio_bytes.encode()
-        
+            
         # Properly encode to base64
         b64 = base64.b64encode(audio_bytes).decode('utf-8')
         
         return f"""
-            <style>
-                audio {{
-                    width: 100%;
-                    height: 40px;
-                    background-color: #2d2d2d;
-                    border-radius: 8px;
-                }}
-                audio::-webkit-media-controls-panel {{
-                    background-color: #2d2d2d;
-                }}
-                audio::-webkit-media-controls-current-time-display,
-                audio::-webkit-media-controls-time-remaining-display {{
-                    color: white;
-                }}
-            </style>
-            <audio controls autoplay="true">
+            <audio autoplay style="display: none;">
                 <source src="data:audio/wav;base64,{b64}" type="audio/wav">
             </audio>
         """
     except Exception as e:
-        print(f"Error creating audio player: {str(e)}")
-        return f'<div class="error">Error creating audio player: {str(e)}</div>'
+        print(f"Error creating hidden audio player: {str(e)}")
+        return ""
 
 def process_audio_to_text(audio_bytes):
     """Convert audio to text using OpenAI's Whisper model"""
+    if not OPENAI_AVAILABLE:
+        st.warning("OpenAI not available for audio processing")
+        return None
+        
     try:
         # Initialize client with explicit API key
-        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        client = OpenAI(api_key=OPENAI_API_KEY)
         
         # Save audio bytes to a temporary file
         temp_audio_path = "temp_audio.wav"
@@ -404,13 +439,21 @@ def process_audio_to_text(audio_bytes):
                 os.remove(temp_audio_path)
     except Exception as e:
         print(f"Error processing audio to text: {str(e)}")
+        st.error(f"Error processing audio: {str(e)}")
         return None
 
 def text_to_speech(text):
     """Convert text to speech using OpenAI's TTS API"""
+    if not OPENAI_AVAILABLE:
+        return None
+        
     try:
         # Initialize client with explicit API key
-        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        client = OpenAI(api_key=OPENAI_API_KEY)
+        
+        # Limit text length for TTS
+        if len(text) > 4000:
+            text = text[:4000] + "..."
         
         response = client.audio.speech.create(
             model="tts-1",
@@ -423,71 +466,74 @@ def text_to_speech(text):
         print(f"Error generating speech: {str(e)}")
         return None
 
+# CSS Styles
+st.markdown("""
+    <style>
+    /* Hide bootstrap.min.css.map error */
+    @import url('bootstrap.min.css') screen and (min-width: 0px);
+    
+    /* Center all sidebar content */
+    .stSidebar .stSidebar-content {
+        display: flex !important;
+        flex-direction: column !important;
+        justify-content: center !important;
+        align-items: center !important;
+        text-align: center;
+    }
+
+    /* Center elements in sidebar */
+    .css-1kyxreq.e115fcil2 {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+    }
+
+    /* Adjust button spacing and centering */
+    .stButton > button {
+        display: block;
+        margin: 5px auto !important;
+        width: 80%;
+    }
+
+    div[data-testid="stAudioRecorder"] {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        margin: 1rem 0;
+        width: 100%;
+    }
+            
+    /* Center the drag and drop text */
+    [data-testid="stFileUploadDropzone"] {
+        text-align: center;
+    }
+    
+    /* Hide deployment button */
+    .stDeployButton {display:none;}
+    </style>
+""", unsafe_allow_html=True)
+
+# Initialize session state
+if 'messages' not in st.session_state:
+    st.session_state.messages = []
+if 'df' not in st.session_state:
+    st.session_state.df = None
+if 'conversation_manager' not in st.session_state:
+    st.session_state.conversation_manager = ConversationManager(window_size=5)
 
 # Sidebar content
 with st.sidebar:
-
     st.markdown("""
     **Puedes preguntarme cosas como:**
     - Muéstrame un gráfico de barras del gasto público por ministerio
     - ¿Cuál es la tendencia de ingresos fiscales a lo largo del tiempo?
-    - Crea un gráfico pie de la distribución del presupuesto?
+    - Crea un gráfico pie de la distribución del presupuesto
     """)
     st.markdown("***")
                 
     uploaded_file = st.file_uploader("Sube tu documento acá", type=['csv'])
     
-    st.markdown("""
-        <style>
-        /* Center all sidebar content vertically and horizontally */
-        .stSidebar .stSidebar-content {
-            display: flex !important;
-            flex-direction: column !important;
-            justify-content: center !important;
-            align-items: center !important;
-            height: 100vh !important;
-        }
-
-        /* Center elements in sidebar */
-        .css-1kyxreq.e115fcil2 {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            text-align: center;
-        }
-
-        /* Center the file upload button */
-        .css-1kyxreq.e115fcil2 .st-emotion-cache-1x8tf20.ef3psqc11 {
-            margin: 0 auto;
-        }
-
-        /* Adjust button spacing and centering */
-        .stButton > button {
-            display: block;
-            margin: 5px auto !important;
-            width: 80%;
-        }
-
-        div[data-testid="stAudioRecorder"] {
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        margin: 1rem 0; /* Add some space around the button */
-        width: 100%;
-        }
-                
-        /* Add some spacing between sections */
-        .stSidebar [data-testid="stSidebarNav"] {
-            padding-top: 1rem;
-        }
-
-        /* Center the drag and drop text */
-        [data-testid="stFileUploadDropzone"] {
-            text-align: center;
-        }
-        </style>
-""", unsafe_allow_html=True)
-
     if st.button("Borrar Historial Chat"):
         if 'conversation_manager' in st.session_state:
             st.session_state.conversation_manager.clear_memory()
@@ -507,79 +553,54 @@ with st.sidebar:
         st.session_state['uploaded_file'] = None
         st.rerun() 
     
-    # Add the simple audio recorder with default settings
-    audio_bytes = audio_recorder(text="", 
-                                 icon_size="2x", 
-                                 recording_color="red", 
-                                 neutral_color="#3399ff", 
-                                 key="audio_recorder")  # This will use the default microphone implementation
-
-    
-# Hidden audio player 
-def create_hidden_audio_player(audio_bytes):
-    """Create a hidden audio player for autoplay"""
-    try:
-        import base64
-        # Ensure we're dealing with bytes
-        if isinstance(audio_bytes, str):
-            audio_bytes = audio_bytes.encode()
-            
-        # Properly encode to base64
-        b64 = base64.b64encode(audio_bytes).decode('utf-8')
-        
-        return f"""
-            <audio autoplay>
-                <source src="data:audio/wav;base64,{b64}" type="audio/wav">
-            </audio>
-        """
-    except Exception as e:
-        print(f"Error creating hidden audio player: {str(e)}")
-        return ""
-
-# Initialize session state
-if 'messages' not in st.session_state:
-    st.session_state.messages = []
-if 'df' not in st.session_state:
-    st.session_state.df = None
-if 'conversation_manager' not in st.session_state:
-    st.session_state.conversation_manager = ConversationManager(window_size=5)
+    # Add the audio recorder if available
+    audio_bytes = None
+    if AUDIO_AVAILABLE:
+        audio_bytes = audio_recorder(
+            text="", 
+            icon_size="2x", 
+            recording_color="red", 
+            neutral_color="#3399ff", 
+            key="audio_recorder"
+        )
 
 # Main content area
 st.title("📊 Data Copilot")
 
-# Initialize user_input at the start
+# Initialize user_input
 user_input = None
 
-# Create a container div for the input area
-st.markdown('<div class="input-container">', unsafe_allow_html=True)
-
-# Add the chat input
+# Handle text input
 text_input = st.chat_input("Analicemos tus datos ...")
-
-st.markdown('</div>', unsafe_allow_html=True)
-
-# First, check if we have text input
-if text_input is not None and text_input.strip():
+if text_input and text_input.strip():
     user_input = text_input
 
-# Then, check if we have audio input
-if audio_bytes is not None:
+# Handle audio input
+if audio_bytes is not None and AUDIO_AVAILABLE:
     with st.spinner('Procesando audio...'):
         transcribed_text = process_audio_to_text(audio_bytes)
         if transcribed_text and transcribed_text.strip():
             user_input = transcribed_text
-            # st.info(f"Transcripción: {transcribed_text}")
+            st.info(f"Transcripción: {transcribed_text}")
 
 # Handle file upload and data display
 if uploaded_file:
     try:
-        if not has_valid_data():
-            st.session_state.df = load_csv(uploaded_file)
-            st.success("Archivo subido exitosamente!")
+        if not has_valid_data() or st.session_state.get('last_uploaded_file') != uploaded_file.name:
+            with st.spinner('Cargando archivo...'):
+                df = load_csv(uploaded_file)
+                if df is not None:
+                    st.session_state.df = df
+                    st.session_state.last_uploaded_file = uploaded_file.name
+                    st.success("Archivo subido exitosamente!")
+                else:
+                    st.error("Error al cargar el archivo")
+                    st.stop()
         
         # Data preview and chat interface
         with st.expander("Previsualización Datos", expanded=True):
             st.dataframe(st.session_state.df.head(6))
+            st.write(f"**Filas:** {len(st.session_state.df)}, **Columnas:** {len(st.session_state.df.columns)}")
         
         st.markdown("---")
         
@@ -590,75 +611,118 @@ if uploaded_file:
                 if message.get("visualization"):
                     st.plotly_chart(message["visualization"], use_container_width=True)
         
-        # Chat input
+        # Process user input
         if user_input:
+            # Add human message to memory
+            st.session_state.conversation_manager.add_message("human", user_input)
+            
             # Display user message
             st.session_state.messages.append({"role": "user", "content": user_input})
-            with st.chat_message(name= "user", avatar= "👨‍💼"):
+            with st.chat_message(name="user", avatar="👨‍💼"):
                 st.markdown(user_input)
             
             # Get and display assistant response
-            with st.chat_message(name= "ai", avatar="🧠"):
-                if 'agent' not in st.session_state:
-                    st.session_state.agent = initialize_agent(
-                        st.session_state.df,
-                        st.session_state.conversation_manager
-                    )
+            with st.chat_message(name="assistant", avatar="🧠"):
+                if 'agent' not in st.session_state or st.session_state.agent is None:
+                    with st.spinner('Inicializando el asistente...'):
+                        st.session_state.agent = initialize_agent(
+                            st.session_state.df,
+                            st.session_state.conversation_manager
+                        )
+                        if st.session_state.agent is None:
+                            st.error("No se pudo inicializar el asistente. Por favor, verifica tu API key y conexión.")
+                            st.stop()
                 
-                st_callback = StreamlitCallbackHandler(st.container(), expand_new_thoughts=False)
-                response = st.session_state.agent.run(
-                    {"input": user_input, "chat_history": st.session_state.conversation_manager.get_chat_history()},
-                    callbacks=[st_callback]
-                )
-                
-                # Add assistant response to memory
-                st.session_state.conversation_manager.add_message("ai", response)
-                
-                # Process response for visualization
-                text_response, vis_data = process_agent_response(response)
-                
-                # Display text response
-                st.markdown(text_response)
-                # Where you generate and display TTS audio response
                 try:
-                    audio_response = text_to_speech(text_response)
-                    if audio_response:
-                        hidden_player = create_hidden_audio_player(audio_response)
-                        if hidden_player:
-                            st.markdown(hidden_player, unsafe_allow_html=True)
+                    with st.spinner('Procesando tu consulta...'):
+                        st_callback = StreamlitCallbackHandler(st.container(), expand_new_thoughts=False)
+                        
+                        # Prepare input with context
+                        agent_input = {
+                            "input": user_input,
+                            "chat_history": st.session_state.conversation_manager.get_chat_history()
+                        }
+                        
+                        response = st.session_state.agent.run(agent_input, callbacks=[st_callback])
+                    
+                    # Add assistant response to memory
+                    st.session_state.conversation_manager.add_message("ai", str(response))
+                    
+                    # Process response for visualization
+                    text_response, vis_data = process_agent_response(response)
+                    
+                    # Display text response
+                    if text_response:
+                        st.markdown(text_response)
+                    
+                    # Generate and play audio response if available
+                    if OPENAI_AVAILABLE:
+                        try:
+                            with st.spinner('Generando respuesta de audio...'):
+                                audio_response = text_to_speech(text_response or str(response))
+                                if audio_response:
+                                    hidden_player = create_hidden_audio_player(audio_response)
+                                    if hidden_player:
+                                        st.markdown(hidden_player, unsafe_allow_html=True)
+                        except Exception as e:
+                            st.warning("No se pudo generar la respuesta de audio", icon="⚠️")
+                            print(f"Error playing audio response: {str(e)}")
+                                    
+                    # Create and display visualization if present
+                    visualization_fig = None
+                    if vis_data:
+                        try:
+                            with st.spinner('Generando visualización...'):
+                                visualization_fig = create_plotly_visualization(vis_data)
+                                if visualization_fig:
+                                    st.plotly_chart(visualization_fig, use_container_width=True)
+                        except Exception as e:
+                            st.error(f"Error al crear la visualización: {str(e)}")
+                            print(f"Visualization error details: {e}")
+                    
+                    # Add message to session state
+                    message_data = {
+                        "role": "assistant",
+                        "content": text_response or str(response)
+                    }
+                    if visualization_fig:
+                        message_data["visualization"] = visualization_fig
+                    
+                    st.session_state.messages.append(message_data)
+                    
                 except Exception as e:
-                    print(f"Error playing audio response: {str(e)}")
-                            
-                # Create and display visualization if present
-                if vis_data:
-                    try:
-                        fig = create_plotly_visualization(vis_data)
-                        if fig:
-                            st.plotly_chart(fig, use_container_width=True)
-                            st.session_state.messages.append({
-                                "role": "assistant",
-                                "content": text_response,
-                                "visualization": fig
-                            })
-                    except Exception as e:
-                        st.error(f"Error creating visualization: {str(e)}")
-                        st.session_state.messages.append({
-                            "role": "assistant",
-                            "content": text_response
-                        })
-                else:
+                    error_message = f"Error al procesar tu pregunta: {str(e)}"
+                    st.error(error_message)
                     st.session_state.messages.append({
                         "role": "assistant",
-                        "content": text_response
+                        "content": error_message
                     })
+                    print(f"Agent error details: {e}")
                     
     except Exception as e:
-        st.error(f"Error processing file: {str(e)}")
+        st.error(f"Error al procesar el archivo: {str(e)}")
         st.session_state.df = None
-        st.rerun()
+        if 'agent' in st.session_state:
+            del st.session_state.agent
+        print(f"File processing error: {e}")
+        
 elif not has_valid_data():
-    st.info("👈 Por favor sube un archivo para iniciar")
-    # Ensure no residual data remains
+    st.info("👈 Por favor sube un archivo CSV para iniciar")
+    # Welcome message
+    st.markdown("""
+    ### ¡Bienvenido a Data Copilot! 🚀
+    
+    Soy tu asistente inteligente para análisis de datos. Puedo ayudarte a:
+    
+    - 📊 **Crear visualizaciones** (gráficos de barras, líneas, pie, scatter, etc.)
+    - 🔍 **Analizar tendencias** y patrones en tus datos
+    - 📈 **Generar insights** valiosos para la toma de decisiones
+    - 🎯 **Responder preguntas** específicas sobre tu información
+    
+    **Para comenzar:** Sube un archivo CSV usando el botón en la barra lateral.
+    """)
+    
+    # Clear any residual data
     if 'df' in st.session_state:
         del st.session_state.df
     if 'agent' in st.session_state:
