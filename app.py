@@ -1,10 +1,18 @@
 import streamlit as st
+
+# Configure page settings
+st.set_page_config(page_title="Data Analyzer", layout="wide")
+
+# Data manipulation and visualization imports
 import pandas as pd
+import numpy as np
 import plotly.graph_objects as go
 from pathlib import Path
 import os
 import json
 from dotenv import load_dotenv
+import tempfile
+import io
 
 # LangChain imports
 from langchain_openai import ChatOpenAI
@@ -14,6 +22,10 @@ from langchain.agents import AgentType
 from langchain.prompts import PromptTemplate
 from langchain.memory import ConversationBufferWindowMemory
 from langchain_core.messages import HumanMessage, AIMessage
+
+# Excel imports
+import openpyxl
+import xlrd
 
 # Audio imports - with error handling
 try:
@@ -39,9 +51,6 @@ if not OPENAI_API_KEY:
     st.error("OpenAI API key not found. Please set the OPENAI_API_KEY environment variable.")
     st.info("You can add your API key to a .env file in the same directory as this script.")
     st.stop()
-
-# Configure page settings
-st.set_page_config(page_title="Data Analyzer", layout="wide")
 
 # System prompt template
 SYSTEM_PROMPT = """You are a data analysis assistant that helps government users understand their data through visualizations and analysis, and identify valuable insights. 
@@ -314,15 +323,98 @@ def create_plotly_visualization(vis_data):
     except Exception as e:
         raise ValueError(f"Error creating visualization: {str(e)}")
 
-@st.cache_data
-def load_csv(uploaded_file):
-    """Load and process uploaded CSV file with caching"""
+def clean_dataframe(df):
+    """Clean and prepare dataframe for analysis"""
     try:
-        # Read CSV directly from uploaded file buffer
-        df = pd.read_csv(uploaded_file)
+        # Remove completely empty rows and columns
+        df = df.dropna(how='all')
+        df = df.dropna(axis=1, how='all')
+        
+        # Try to convert numeric columns to numeric type
+        for col in df.columns:
+            try:
+                # Replace common non-numeric characters
+                if df[col].dtype == 'object':
+                    df[col] = df[col].str.replace('$', '', regex=False)
+                    df[col] = df[col].str.replace(',', '', regex=False)
+                    df[col] = df[col].str.replace('%', '', regex=False)
+                # Try to convert to numeric
+                df[col] = pd.to_numeric(df[col], errors='ignore')
+            except:
+                continue
+        
         return df
     except Exception as e:
-        st.error(f"Error loading CSV file: {str(e)}")
+        print(f"Error cleaning dataframe: {e}")
+        return df
+
+@st.cache_data
+def load_file(uploaded_file):
+    """Load and process uploaded file with caching"""
+    try:
+        file_extension = Path(uploaded_file.name).suffix.lower()
+        
+        if file_extension == '.csv':
+            try:
+                # Try different encodings
+                encodings = ['utf-8', 'latin1', 'iso-8859-1', 'cp1252']
+                df = None
+                
+                for encoding in encodings:
+                    try:
+                        df = pd.read_csv(uploaded_file, encoding=encoding)
+                        break
+                    except UnicodeDecodeError:
+                        continue
+                    except Exception as e:
+                        print(f"Error with encoding {encoding}: {e}")
+                        continue
+                
+                if df is None:
+                    st.error("No se pudo leer el archivo CSV con ninguna codificación conocida")
+                    return None
+                    
+                if df.empty:
+                    st.error("El archivo CSV está vacío")
+                    return None
+                    
+                return clean_dataframe(df)
+                
+            except Exception as e:
+                st.error(f"Error al leer el archivo CSV: {str(e)}")
+                return None
+                
+        elif file_extension in ['.xlsx', '.xls']:
+            try:
+                # Try to read all sheets
+                all_sheets = pd.read_excel(uploaded_file, sheet_name=None)
+                
+                if len(all_sheets) > 1:
+                    # If multiple sheets, let user select one
+                    sheet_name = st.selectbox(
+                        "Selecciona una hoja del archivo Excel:",
+                        list(all_sheets.keys())
+                    )
+                    df = all_sheets[sheet_name]
+                else:
+                    # If only one sheet, use it
+                    df = pd.read_excel(uploaded_file)
+                
+                if df.empty:
+                    st.error("El archivo Excel está vacío")
+                    return None
+                    
+                return clean_dataframe(df)
+                
+            except Exception as e:
+                st.error(f"Error al leer el archivo Excel: {str(e)}")
+                return None
+        else:
+            st.error(f"Formato de archivo no soportado. Por favor, usa archivos CSV o Excel (.xlsx, .xls)")
+            return None
+            
+    except Exception as e:
+        st.error(f"Error al cargar el archivo: {str(e)}")
         return None
 
 def initialize_agent(df, conversation_manager):
@@ -532,7 +624,9 @@ with st.sidebar:
     """)
     st.markdown("***")
                 
-    uploaded_file = st.file_uploader("Sube tu documento acá", type=['csv'])
+    uploaded_file = st.file_uploader("Sube tu documento acá", 
+                                    type=['csv', 'xlsx', 'xls'],
+                                    help="Soporta archivos CSV y Excel (.xlsx, .xls)")
     
     if st.button("Borrar Historial Chat"):
         if 'conversation_manager' in st.session_state:
@@ -588,7 +682,7 @@ if uploaded_file:
     try:
         if not has_valid_data() or st.session_state.get('last_uploaded_file') != uploaded_file.name:
             with st.spinner('Cargando archivo...'):
-                df = load_csv(uploaded_file)
+                df = load_file(uploaded_file)
                 if df is not None:
                     st.session_state.df = df
                     st.session_state.last_uploaded_file = uploaded_file.name
